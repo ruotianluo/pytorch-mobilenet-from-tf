@@ -14,3 +14,6 @@ This will generate a `pth` file which has the same name as the tensorflow checkp
 ## Preprocessing:
 The preoprocessing follows the tensorflow incecption: `trn.Normalize([0.5, 0.5, 0.5],[0.5, 0.5, 0.5]`.
 
+## The current problem
+It seems like the slim conv2d is a little bit different from pytorch conv2d, so I can't get exactly the same tensors. However, feeding the sample image (tiger.jpg), both model can produce same category.
+

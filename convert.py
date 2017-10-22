@@ -99,7 +99,7 @@ torch.save(var_dict, args.tensorflow_model[:args.tensorflow_model.find('.ckpt')]
 Make sure the tensorflow and pytorch gives the same output (Haven't passed yet.)
 """
 
-sample_input = (imresize(imread('tiger.jpg'), (224, 224))[np.newaxis,:,:,:].astype(np.float32)/255.0 - 0.5) * 2
+sample_input = (imresize(imread('tiger.jpg'), (args.image_size, args.image_size))[np.newaxis,:,:,:].astype(np.float32)/255.0 - 0.5) * 2
 # sample_input = (np.random.random((1,4,4,3)).astype(np.float32) - 0.5) * 2
 
 def test_tf(inp):
