@@ -33,10 +33,11 @@ var_dict = {k:reader.get_tensor(k) for k in var_to_shape_map.keys()}
 model = mobilenet.MobileNet_v1(depth_multiplier=args.depth_multiplier, num_classes=1001)
 x = model.state_dict()
 
-# if args.mode == 'caffe':
-#     var_dict['MobilenetV1/Conv2d_0/weights'] = var_dict['MobilenetV1/Conv2d_0/weights'][:,:,::-1,:] / 127.5
-# elif args.mode == 'torch':
-#     var_dict['MobilenetV1/Conv2d_0/weights'] = var_dict['MobilenetV1/Conv2d_0/weights'] * 2 * np.array([0.229, 0.224, 0.225])[np.newaxis,np.newaxis,:,np.newaxis]
+if args.mode == 'caffe':
+    var_dict['MobilenetV1/Conv2d_0/weights'] = var_dict['MobilenetV1/Conv2d_0/weights'][:,:,::-1,:] / 127.5
+elif args.mode == 'torch':
+    print('Please use transforms.Normalize([0.5, 0.5, 0.5],[0.5, 0.5, 0.5]) for preprocessing')
+    # var_dict['MobilenetV1/Conv2d_0/weights'] = var_dict['MobilenetV1/Conv2d_0/weights'] * 2 * np.array([0.229, 0.224, 0.225])[np.newaxis,np.newaxis,:,np.newaxis]
 
 # del var_dict['Variable']
 # del var_dict['global_step']
@@ -105,7 +106,7 @@ sample_input = (imresize(imread('tiger.jpg'), (args.image_size, args.image_size)
 def test_tf(inp):
     import tensorflow.contrib.slim as slim
     import mobilenet_v1
-    input = tf.placeholder(tf.float32, [None, None, None, 3])
+    input = tf.placeholder(tf.float32, [None, args.image_size, args.image_size, 3])
     with slim.arg_scope(mobilenet_v1.mobilenet_v1_arg_scope()):
         net = mobilenet_v1.mobilenet_v1(input, num_classes=1001, depth_multiplier=args.depth_multiplier, is_training=False)
     # Add ops to restore all the variables.
@@ -162,7 +163,9 @@ def assert_almost_equal(tf_tensor, th_tensor):
     print "d", d
     assert d < 500
 
+print('forward tf')
 tf_out = test_tf(sample_input)
+print('forward pth')
 pth_out = test_pth(sample_input)
 
 # assert_almost_equal(tf_out, pth_out)
