@@ -181,7 +181,7 @@ def mobilenet_base(final_endpoint='layer_19',
 class MobileNet_v2(nn.Module):
 
     def __init__(self, num_classes=1000,
-                 dropout_keep_prob=0.999,
+                 dropout=0.2,
                  multiplier=1.0,
                  conv_defs=V2_DEF,
                  finegrain_classification_mode=False,
@@ -231,7 +231,7 @@ class MobileNet_v2(nn.Module):
             if multiplier < 1:
                 conv_defs[-1][1]['num_outputs'] /= multiplier
 
-        self.dropout_keep_prob = dropout_keep_prob
+        self.dropout = dropout
         self.spatial_squeeze = spatial_squeeze
         self.global_pool = global_pool
         self.features = mobilenet_base(min_depth=min_depth,
@@ -255,7 +255,7 @@ class MobileNet_v2(nn.Module):
             # Pooling with a fixed kernel size.
             kernel_size = _reduced_kernel_size_for_small_input(x, [7, 7])
             x = F.avg_pool2d(x, kernel_size)
-        x = F.dropout(x, 1-self.dropout_keep_prob, self.training)
+        x = F.dropout(x, self.dropout, self.training)
         x = self.classifier(x)
         if self.spatial_squeeze:
             x = x.squeeze(3).squeeze(2)
