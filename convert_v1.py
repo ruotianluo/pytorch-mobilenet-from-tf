@@ -9,7 +9,7 @@ import re
 import torch
 import numpy as np
 
-import mobilenet
+import mobilenet_v1
 
 from scipy.misc import imread, imresize
 
@@ -34,7 +34,7 @@ reader = pywrap_tensorflow.NewCheckpointReader(args.tensorflow_model)
 var_to_shape_map = reader.get_variable_to_shape_map()
 var_dict = {k:reader.get_tensor(k) for k in var_to_shape_map.keys()}
 
-model = mobilenet.MobileNet_v1(depth_multiplier=args.depth_multiplier, num_classes=1001)
+model = mobilenet_v1.MobileNet_v1(depth_multiplier=args.depth_multiplier, num_classes=1001)
 x = model.state_dict()
 
 if args.mode == 'caffe':
@@ -110,10 +110,10 @@ sample_input = (imresize(imread('tiger.jpg'), (args.image_size, args.image_size)
 
 def test_tf(inp):
     import tensorflow.contrib.slim as slim
-    import mobilenet_v1
+    import mobilenet_v1_tf
     input = tf.placeholder(tf.float32, [None, args.image_size, args.image_size, 3])
-    with slim.arg_scope(mobilenet_v1.mobilenet_v1_arg_scope()):
-        net = mobilenet_v1.mobilenet_v1(input, num_classes=1001, depth_multiplier=args.depth_multiplier, is_training=False)
+    with slim.arg_scope(mobilenet_v1_tf.mobilenet_v1_arg_scope()):
+        net = mobilenet_v1_tf.mobilenet_v1(input, num_classes=1001, depth_multiplier=args.depth_multiplier, is_training=False)
     # Add ops to restore all the variables.
     restorer = tf.train.Saver()
 
