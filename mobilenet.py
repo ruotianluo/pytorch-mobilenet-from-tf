@@ -2,7 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from collections import namedtuple, OrderedDict
+from collections import namedtuple, OrderedDict, Iterable
 
 import torch
 import torch.nn as nn
@@ -35,11 +35,78 @@ _CONV_DEFS = [
 ]
 
 
+def make_fixed_padding(kernel_size, rate=1):
+  """Pads the input along the spatial dimensions independently of input size.
+
+  Pads the input such that if it was used in a convolution with 'VALID' padding,
+  the output would have the same dimensions as if the unpadded input was used
+  in a convolution with 'SAME' padding.
+
+  Args:
+    kernel_size: The kernel to be used in the conv2d or max_pool2d operation.
+    rate: An integer, rate for atrous convolution.
+
+  Returns:
+    output: A padding module.
+  """
+  kernel_size_effective = [kernel_size[0] + (kernel_size[0] - 1) * (rate - 1),
+                           kernel_size[0] + (kernel_size[0] - 1) * (rate - 1)]
+  pad_total = [kernel_size_effective[0] - 1, kernel_size_effective[1] - 1]
+  pad_beg = [pad_total[0] // 2, pad_total[1] // 2]
+  pad_end = [pad_total[0] - pad_beg[0], pad_total[1] - pad_beg[1]]
+  padding_module = nn.ZeroPad2d((pad_beg[0], pad_end[0],
+                                  pad_beg[1], pad_end[1]))
+  return padding_module
+
+class Conv2d_tf(nn.Conv2d):
+    def __init__(self, *args, **kwargs):
+        super(Conv2d_tf, self).__init__(*args, **kwargs)
+        self.padding = kwargs.get('padding', 'SAME')
+        kwargs['padding'] = 0
+        if not isinstance(self.stride, Iterable):
+            self.stride = (self.stride, self.stride)
+        if not isinstance(self.dilation, Iterable):
+            self.dilation = (self.dilation, self.dilation)
+
+    def forward(self, input):
+        # from https://github.com/pytorch/pytorch/issues/3867
+        if self.padding == 'VALID':
+            return F.conv2d(input, self.weight, self.bias, self.stride,
+                            padding=0,
+                            dilation=self.dilation, groups=self.groups)
+        input_rows = input.size(2)
+        filter_rows = self.weight.size(2)
+        effective_filter_size_rows = (filter_rows - 1) * self.dilation[0] + 1
+        out_rows = (input_rows + self.stride[0] - 1) // self.stride[0]
+        padding_rows = max(0, (out_rows - 1) * self.stride[0] + effective_filter_size_rows -
+                                input_rows)
+        # padding_rows = max(0, (out_rows - 1) * self.stride[0] +
+        #                         (filter_rows - 1) * self.dilation[0] + 1 - input_rows)
+        rows_odd = (padding_rows % 2 != 0)
+        # same for padding_cols
+        input_cols = input.size(3)
+        filter_cols = self.weight.size(3)
+        effective_filter_size_cols = (filter_cols - 1) * self.dilation[1] + 1
+        out_cols = (input_cols + self.stride[1] - 1) // self.stride[1]
+        padding_cols = max(0, (out_cols - 1) * self.stride[1] + effective_filter_size_cols -
+                                input_cols)
+        # padding_cols = max(0, (out_cols - 1) * self.stride[1] +
+        #                         (filter_cols - 1) * self.dilation[1] + 1 - input_cols)
+        cols_odd = (padding_cols % 2 != 0)
+
+        if rows_odd or cols_odd:
+            input = F.pad(input, [0, int(cols_odd), 0, int(rows_odd)])
+
+        return F.conv2d(input, self.weight, self.bias, self.stride,
+                        padding=(padding_rows // 2, padding_cols // 2),
+                        dilation=self.dilation, groups=self.groups)
+
 def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
                       min_depth=8,
                       depth_multiplier=1.0,
                       conv_defs=None,
-                      output_stride=None):
+                      output_stride=None,
+                      use_explicit_padding=False):
     """Mobilenet v1.
 
     Constructs a Mobilenet v1 network from inputs to the given final endpoint.
@@ -90,16 +157,16 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
     if output_stride is not None and output_stride not in [8, 16, 32]:
         raise ValueError('Only allowed output_stride values are 8, 16, 32.')
 
-    def conv_bn(in_channels, out_channels, kernel_size=3, stride=1):
+    def conv_bn(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
         return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size, stride, 1, bias=False),
+            Conv2d_tf(in_channels, out_channels, kernel_size, stride, padding, bias=False),
             nn.BatchNorm2d(out_channels, eps=0.001),
             nn.ReLU6(inplace=True)
         )
 
-    def conv_dw(in_channels, kernel_size=3, stride=1, dilation=1):
+    def conv_dw(in_channels, kernel_size=3, stride=1, padding=1, dilation=1):
         return nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, kernel_size, stride, 1,\
+            Conv2d_tf(in_channels, in_channels, kernel_size, stride, padding,\
                       groups=in_channels, dilation=dilation, bias=False),
             nn.BatchNorm2d(in_channels, eps=0.001),
             nn.ReLU6(inplace=True)
@@ -107,7 +174,7 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
 
     def conv_pw(in_channels, out_channels, kernel_size=1, stride=1, dilation=1):
         return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size, stride, 0, bias=False),
+            Conv2d_tf(in_channels, out_channels, kernel_size, stride, 0, bias=False),
             nn.BatchNorm2d(out_channels, eps=0.001),
             nn.ReLU6(inplace=True),
         )
@@ -140,16 +207,30 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
 
         out_channels = depth(conv_def.depth)
         if isinstance(conv_def, Conv):
+            tmp = OrderedDict()
+            if use_explicit_padding:
+                tmp.update({'Pad': make_fixed_padding(conv_def.kernel, layer_rate)})
+                padding = 'VALID'
+            else:
+                padding = 'SAME'
             end_point = end_point_base
-            end_points[end_point] = conv_bn(in_channels, out_channels, conv_def.kernel,
-                                            stride=conv_def.stride)
+            tmp.update({'conv': conv_bn(in_channels, out_channels, conv_def.kernel,
+                                            stride=conv_def.stride, padding=padding)})
+            end_points[end_point] = nn.Sequential(tmp)
             if end_point == final_endpoint:
                 return nn.Sequential(end_points)
 
         elif isinstance(conv_def, DepthSepConv):
-            end_points[end_point_base] = nn.Sequential(OrderedDict([
-                ('depthwise', conv_dw(in_channels, conv_def.kernel, stride=layer_stride, dilation=layer_rate)),
+            tmp = OrderedDict()
+            if use_explicit_padding:
+                tmp.update({'Pad': make_fixed_padding(conv_def.kernel, layer_rate)})
+                padding = 'VALID'
+            else:
+                padding = 'SAME'
+            tmp.update(OrderedDict([
+                ('depthwise', conv_dw(in_channels, conv_def.kernel, stride=layer_stride, padding=padding, dilation=layer_rate)),
                 ('pointwise', conv_pw(in_channels, out_channels, 1, stride=1))]))
+            end_points[end_point_base] = nn.Sequential(tmp)
 
             if end_point_base + '_pointwise' == final_endpoint:
                 return nn.Sequential(end_points)
@@ -167,11 +248,14 @@ class MobileNet_v1(nn.Module):
                  min_depth=8,
                  depth_multiplier=1.0,
                  conv_defs=_CONV_DEFS,
-                 spatial_squeeze=True):
+                 spatial_squeeze=True,
+                 global_pool=False):
         """Mobilenet v1 model for classification.
 
         Args:
-            num_classes: number of predicted classes.
+            num_classes: number of predicted classes. If 0 or None, the logits layer
+                is omitted and the input features to the logits layer (before dropout)
+                are returned instead.
             dropout_keep_prob: the percentage of activation values that are retained.
             min_depth: Minimum depth value (number of channels) for all convolution ops.
                 Enforced when depth_multiplier < 1, and not an active constraint when
@@ -184,13 +268,16 @@ class MobileNet_v1(nn.Module):
             prediction_fn: a function to get predictions out of logits.
             spatial_squeeze: if True, logits is of shape is [B, C], if false logits is
                     of shape [B, 1, 1, C], where B is batch_size and C is number of classes.
-            reuse: whether or not the network and its variables should be reused. To be
-                able to reuse 'scope' must be given.
-            scope: Optional variable_scope.
+            global_pool: Optional boolean flag to control the avgpooling before the
+                logits layer. If false or unset, pooling is done with a fixed window
+                that reduces default-sized inputs to 1x1, while larger inputs lead to
+                larger outputs. If true, any input size is pooled down to 1x1.
+
 
         Returns:
-            logits: the pre-softmax activations, a tensor of size
-                [batch_size, num_classes]
+            net: a 2D Tensor with the logits (pre-softmax activations) if num_classes
+                is a non-zero integer, or the non-dropped-out input to the logits layer
+                if num_classes is 0 or None.
             end_points: a dictionary from components of the network to the corresponding
                 activation.
 
@@ -200,6 +287,7 @@ class MobileNet_v1(nn.Module):
         super(MobileNet_v1, self).__init__()
         self.dropout_keep_prob = dropout_keep_prob
         self.spatial_squeeze = spatial_squeeze
+        self.global_pool = global_pool
         self.features = mobilenet_v1_base(min_depth=min_depth,
                                           depth_multiplier=depth_multiplier,
                                           conv_defs=conv_defs)
@@ -212,8 +300,13 @@ class MobileNet_v1(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
-        kernel_size = _reduced_kernel_size_for_small_input(x, [7, 7])
-        x = F.avg_pool2d(x, kernel_size)
+        if self.global_pool:
+            # Global average pooling.
+            x = x.mean(2, keepdim=True).mean(3, keepdim=True)
+        else:
+            # Pooling with a fixed kernel size.
+            kernel_size = _reduced_kernel_size_for_small_input(x, [7, 7])
+            x = F.avg_pool2d(x, kernel_size)
         x = F.dropout(x, 1-self.dropout_keep_prob, self.training)
         x = self.classifier(x)
         if self.spatial_squeeze:

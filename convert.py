@@ -61,12 +61,13 @@ dummy_replace = OrderedDict([
                 ('weights', 'weight'),\
                 ('biases', 'bias'),\
                 ('/BatchNorm', '.1'),\
-                ('_pointwise/', '.pointwise.0.'),\
-                ('_depthwise/depthwise_', '.depthwise.0.'),\
                 ('_pointwise.1', '.pointwise.1'),\
                 ('_depthwise.1', '.depthwise.1'),\
+                ('_pointwise/', '.pointwise.0.'),\
+                ('_depthwise/depthwise_', '.depthwise.0.'),\
                 ('features/Logits/Conv2d_1c_1x1/', 'classifier.'),\
-                ('Conv2d_0/', 'Conv2d_0.0.'),\
+                ('Conv2d_0/', 'Conv2d_0.conv.0.'),\
+                ('Conv2d_0.1/', 'Conv2d_0.conv.1.'),\
                 ('gamma', 'weight'),\
                 ('beta', 'bias'),\
                 ('/', '.')])
@@ -175,11 +176,11 @@ pth_out = test_pth(sample_input)
 # assert_almost_equal(tf_out, pth_out)
 
 # Can't pass it now
-# assert_almost_equal(tf_out[1]['Conv2d_0'], pth_out[1]['Conv2d_0'])
-# for i in range(1, 12):
-#     assert_almost_equal(tf_out[1]['Conv2d_%s_pointwise'%(i)], pth_out[1]['Conv2d_%s'%(i)])
-
-assert np.all(tf_out[0].argmax() == pth_out[0].data.numpy().argmax())
+assert_almost_equal(tf_out[1]['Conv2d_0'], pth_out[1]['Conv2d_0'])
+for i in range(1, 12):
+    assert_almost_equal(tf_out[1]['Conv2d_%s_pointwise'%(i)], pth_out[1]['Conv2d_%s'%(i)])
+print(tf_out[0].argmax(), pth_out[0].data.numpy().argmax())
+assert np.all(tf_out[0].argmax() == pth_out[0].data.numpy().argmax()), tf_out[0].argmax()
 
 
 
