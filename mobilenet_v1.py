@@ -36,27 +36,29 @@ _CONV_DEFS = [
 
 
 def make_fixed_padding(kernel_size, rate=1):
-  """Pads the input along the spatial dimensions independently of input size.
+    """Pads the input along the spatial dimensions independently of input size.
 
-  Pads the input such that if it was used in a convolution with 'VALID' padding,
-  the output would have the same dimensions as if the unpadded input was used
-  in a convolution with 'SAME' padding.
+    Pads the input such that if it was used in a convolution with 'VALID' padding,
+    the output would have the same dimensions as if the unpadded input was used
+    in a convolution with 'SAME' padding.
 
-  Args:
-    kernel_size: The kernel to be used in the conv2d or max_pool2d operation.
-    rate: An integer, rate for atrous convolution.
+    Args:
+        kernel_size: The kernel to be used in the conv2d or max_pool2d operation.
+        rate: An integer, rate for atrous convolution.
 
-  Returns:
-    output: A padding module.
-  """
-  kernel_size_effective = [kernel_size[0] + (kernel_size[0] - 1) * (rate - 1),
-                           kernel_size[0] + (kernel_size[0] - 1) * (rate - 1)]
-  pad_total = [kernel_size_effective[0] - 1, kernel_size_effective[1] - 1]
-  pad_beg = [pad_total[0] // 2, pad_total[1] // 2]
-  pad_end = [pad_total[0] - pad_beg[0], pad_total[1] - pad_beg[1]]
-  padding_module = nn.ZeroPad2d((pad_beg[0], pad_end[0],
-                                  pad_beg[1], pad_end[1]))
-  return padding_module
+    Returns:
+        output: A padding module.
+    """
+    if not isinstance(kernel_size, Iterable):
+        kernel_size = (kernel_size, kernel_size)
+    kernel_size_effective = [kernel_size[0] + (kernel_size[0] - 1) * (rate - 1),
+                            kernel_size[0] + (kernel_size[0] - 1) * (rate - 1)]
+    pad_total = [kernel_size_effective[0] - 1, kernel_size_effective[1] - 1]
+    pad_beg = [pad_total[0] // 2, pad_total[1] // 2]
+    pad_end = [pad_total[0] - pad_beg[0], pad_total[1] - pad_beg[1]]
+    padding_module = nn.ZeroPad2d((pad_beg[0], pad_end[0],
+                                    pad_beg[1], pad_end[1]))
+    return padding_module
 
 class Conv2d_tf(nn.Conv2d):
     def __init__(self, *args, **kwargs):
