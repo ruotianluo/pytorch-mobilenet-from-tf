@@ -9,7 +9,8 @@ import re
 import torch
 import numpy as np
 
-import mobilenet_v1
+import mobilenet_v2
+import mobilenet_v2_tf
 
 from scipy.misc import imread, imresize
 
@@ -34,7 +35,7 @@ reader = pywrap_tensorflow.NewCheckpointReader(args.tensorflow_model)
 var_to_shape_map = reader.get_variable_to_shape_map()
 var_dict = {k:reader.get_tensor(k) for k in var_to_shape_map.keys()}
 
-model = mobilenet_v1.MobileNet_v1(depth_multiplier=args.depth_multiplier, num_classes=1001)
+model = mobilenet_v2.MobileNet_v2(multiplier=args.depth_multiplier, num_classes=1001)
 x = model.state_dict()
 
 if args.mode == 'caffe':
@@ -55,19 +56,27 @@ for k in list(var_dict.keys()):
         var_dict['features'+k[k.find('/'):]] = var_dict[k]
         del var_dict[k]
 
+for k in list(var_dict.keys()):
+    if 'expanded_conv_' in k:
+        m = re.search('expanded_conv_(\d+)', k)
+        var_dict[k.replace(m.group(0), 'layer_%d.module'%(int(m.group(1))+2))] = var_dict[k]
+        del var_dict[k]
+
 dummy_replace = OrderedDict([
                 ('moving_mean', 'running_mean'),\
                 ('moving_variance', 'running_var'),\
                 ('weights', 'weight'),\
                 ('biases', 'bias'),\
+                ('expanded_conv', 'layer_2.module'),\
+                ('depthwise_weight', '0.weight'),\
                 ('/BatchNorm', '.1'),\
-                ('_pointwise.1', '.pointwise.1'),\
-                ('_depthwise.1', '.depthwise.1'),\
-                ('_pointwise/', '.pointwise.0.'),\
-                ('_depthwise/depthwise_', '.depthwise.0.'),\
+                ('project/weight', 'project.0.weight'),\
+                ('expand/weight', 'expand.0.weight'),\
                 ('features/Logits/Conv2d_1c_1x1/', 'classifier.'),\
-                ('Conv2d_0/', 'Conv2d_0.conv.0.'),\
-                ('Conv2d_0.1/', 'Conv2d_0.conv.1.'),\
+                ('Conv.1', 'layer_1.conv.1'),\
+                ('Conv_1.1', 'layer_19.conv.1'),\
+                ('Conv/', 'layer_1.conv.0.'),\
+                ('Conv_1/', 'layer_19.conv.0.'),\
                 ('gamma', 'weight'),\
                 ('beta', 'bias'),\
                 ('/', '.')])
@@ -93,11 +102,11 @@ for k in list(var_dict.keys()):
             var_dict[k] = var_dict[k].transpose((3, 2, 0, 1)).copy(order='C')
     if var_dict[k].ndim == 2:
         var_dict[k] = var_dict[k].transpose((1, 0)).copy(order='C')
-    assert x[k].shape == var_dict[k].shape, k
+    if x[k].shape != var_dict[k].shape:
+        print(str(k) + str(x[k].shape) + str(var_dict[k].shape))
 
 for k in list(var_dict.keys()):
     var_dict[k] = torch.from_numpy(var_dict[k])
-
 
 torch.save(var_dict, args.tensorflow_model[:args.tensorflow_model.find('.ckpt')]+'.pth')
 
@@ -110,10 +119,13 @@ sample_input = (imresize(imread('tiger.jpg'), (args.image_size, args.image_size)
 
 def test_tf(inp):
     import tensorflow.contrib.slim as slim
-    import mobilenet_v1_tf
+    import mobilenet_v2_tf.mobilenet_v2 as mobilenet_v2_tf
     input = tf.placeholder(tf.float32, [None, args.image_size, args.image_size, 3])
-    with slim.arg_scope(mobilenet_v1_tf.mobilenet_v1_arg_scope()):
-        net = mobilenet_v1_tf.mobilenet_v1(input, num_classes=1001, depth_multiplier=args.depth_multiplier, is_training=False)
+    # import sys
+    # sys.path.append('/Users/ruotian.luo/models/research/slim')
+    # from nets.mobilenet import mobilenet_v2 as mobilenet_v2_tf
+    with tf.contrib.slim.arg_scope(mobilenet_v2_tf.training_scope(is_training=False)):
+        net = mobilenet_v2_tf.mobilenet(input, num_classes=1001, depth_multiplier=args.depth_multiplier)
     # Add ops to restore all the variables.
     restorer = tf.train.Saver()
 
@@ -134,7 +146,6 @@ def test_tf(inp):
     return out
 
 def test_pth(inp):
-    # var_dict['features.Conv2d_0.0.weight'].fill_(1)
     model.load_state_dict(var_dict)
     model.eval()
 
@@ -175,9 +186,8 @@ pth_out = test_pth(sample_input)
 
 # assert_almost_equal(tf_out, pth_out)
 
-assert_almost_equal(tf_out[1]['Conv2d_0'], pth_out[1]['Conv2d_0'])
-for i in range(1, 12):
-    assert_almost_equal(tf_out[1]['Conv2d_%s_pointwise'%(i)], pth_out[1]['Conv2d_%s'%(i)])
+for i in range(1, 19):
+    assert_almost_equal(tf_out[1]['layer_%s'%(i)], pth_out[1]['layer_%s'%(i)])
 print(tf_out[0].argmax(), pth_out[0].data.numpy().argmax())
 assert np.all(tf_out[0].argmax() == pth_out[0].data.numpy().argmax()), tf_out[0].argmax()
 
