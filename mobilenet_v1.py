@@ -174,7 +174,7 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
 
     def conv_pw(in_channels, out_channels, kernel_size=1, stride=1, dilation=1):
         return nn.Sequential(
-            Conv2d_tf(in_channels, out_channels, kernel_size, stride, 0, bias=False),
+            nn.Conv2d(in_channels, out_channels, kernel_size, stride, 0, bias=False),
             nn.BatchNorm2d(out_channels, eps=0.001),
             nn.ReLU6(inplace=True),
         )
