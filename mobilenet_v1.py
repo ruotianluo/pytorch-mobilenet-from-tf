@@ -209,7 +209,7 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
         if isinstance(conv_def, Conv):
             tmp = OrderedDict()
             if use_explicit_padding:
-                tmp.update({'Pad': make_fixed_padding(conv_def.kernel, layer_rate)})
+                tmp.update({'Pad': make_fixed_padding(conv_def.kernel)})
                 padding = 'VALID'
             else:
                 padding = 'SAME'
