@@ -157,14 +157,14 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
     if output_stride is not None and output_stride not in [8, 16, 32]:
         raise ValueError('Only allowed output_stride values are 8, 16, 32.')
 
-    def conv_bn(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+    def conv_bn(in_channels, out_channels, kernel_size=3, stride=1, padding='SAME'):
         return nn.Sequential(
             Conv2d_tf(in_channels, out_channels, kernel_size, stride, padding, bias=False),
             nn.BatchNorm2d(out_channels, eps=0.001),
             nn.ReLU6(inplace=True)
         )
 
-    def conv_dw(in_channels, kernel_size=3, stride=1, padding=1, dilation=1):
+    def conv_dw(in_channels, kernel_size=3, stride=1, padding='SAME', dilation=1):
         return nn.Sequential(
             Conv2d_tf(in_channels, in_channels, kernel_size, stride, padding,\
                       groups=in_channels, dilation=dilation, bias=False),
