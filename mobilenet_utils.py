@@ -174,7 +174,7 @@ class ExpandedConv(nn.Module):
         tmp['depthwise'] = conv_dw(inner_size, kernel_size=kernel_size, stride=stride, padding=padding, dilation=layer_rate)
         tmp['project'] = nn.Sequential(
             nn.Conv2d(inner_size, out_channels, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(out_channels))
+            nn.BatchNorm2d(out_channels, eps=0.001))
         self.module = nn.Sequential(tmp)
 
     def forward(self, x):
