@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from mobilenet_utils import *
+
 # Conv and DepthSepConv namedtuple define layers of the MobileNet architecture
 # Conv defines 3x3 convolution layers
 # DepthSepConv defines 3x3 depthwise convolution followed by 1x1 convolution.
@@ -33,75 +35,6 @@ _CONV_DEFS = [
     DepthSepConv(kernel=[3, 3], stride=2, depth=1024),
     DepthSepConv(kernel=[3, 3], stride=1, depth=1024)
 ]
-
-
-def make_fixed_padding(kernel_size, rate=1):
-    """Pads the input along the spatial dimensions independently of input size.
-
-    Pads the input such that if it was used in a convolution with 'VALID' padding,
-    the output would have the same dimensions as if the unpadded input was used
-    in a convolution with 'SAME' padding.
-
-    Args:
-        kernel_size: The kernel to be used in the conv2d or max_pool2d operation.
-        rate: An integer, rate for atrous convolution.
-
-    Returns:
-        output: A padding module.
-    """
-    if not isinstance(kernel_size, Iterable):
-        kernel_size = (kernel_size, kernel_size)
-    kernel_size_effective = [kernel_size[0] + (kernel_size[0] - 1) * (rate - 1),
-                            kernel_size[0] + (kernel_size[0] - 1) * (rate - 1)]
-    pad_total = [kernel_size_effective[0] - 1, kernel_size_effective[1] - 1]
-    pad_beg = [pad_total[0] // 2, pad_total[1] // 2]
-    pad_end = [pad_total[0] - pad_beg[0], pad_total[1] - pad_beg[1]]
-    padding_module = nn.ZeroPad2d((pad_beg[0], pad_end[0],
-                                    pad_beg[1], pad_end[1]))
-    return padding_module
-
-class Conv2d_tf(nn.Conv2d):
-    def __init__(self, *args, **kwargs):
-        super(Conv2d_tf, self).__init__(*args, **kwargs)
-        self.padding = kwargs.get('padding', 'SAME')
-        kwargs['padding'] = 0
-        if not isinstance(self.stride, Iterable):
-            self.stride = (self.stride, self.stride)
-        if not isinstance(self.dilation, Iterable):
-            self.dilation = (self.dilation, self.dilation)
-
-    def forward(self, input):
-        # from https://github.com/pytorch/pytorch/issues/3867
-        if self.padding == 'VALID':
-            return F.conv2d(input, self.weight, self.bias, self.stride,
-                            padding=0,
-                            dilation=self.dilation, groups=self.groups)
-        input_rows = input.size(2)
-        filter_rows = self.weight.size(2)
-        effective_filter_size_rows = (filter_rows - 1) * self.dilation[0] + 1
-        out_rows = (input_rows + self.stride[0] - 1) // self.stride[0]
-        padding_rows = max(0, (out_rows - 1) * self.stride[0] + effective_filter_size_rows -
-                                input_rows)
-        # padding_rows = max(0, (out_rows - 1) * self.stride[0] +
-        #                         (filter_rows - 1) * self.dilation[0] + 1 - input_rows)
-        rows_odd = (padding_rows % 2 != 0)
-        # same for padding_cols
-        input_cols = input.size(3)
-        filter_cols = self.weight.size(3)
-        effective_filter_size_cols = (filter_cols - 1) * self.dilation[1] + 1
-        out_cols = (input_cols + self.stride[1] - 1) // self.stride[1]
-        padding_cols = max(0, (out_cols - 1) * self.stride[1] + effective_filter_size_cols -
-                                input_cols)
-        # padding_cols = max(0, (out_cols - 1) * self.stride[1] +
-        #                         (filter_cols - 1) * self.dilation[1] + 1 - input_cols)
-        cols_odd = (padding_cols % 2 != 0)
-
-        if rows_odd or cols_odd:
-            input = F.pad(input, [0, int(cols_odd), 0, int(rows_odd)])
-
-        return F.conv2d(input, self.weight, self.bias, self.stride,
-                        padding=(padding_rows // 2, padding_cols // 2),
-                        dilation=self.dilation, groups=self.groups)
 
 def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
                       min_depth=8,
@@ -158,28 +91,6 @@ def mobilenet_v1_base(final_endpoint='Conv2d_13_pointwise',
 
     if output_stride is not None and output_stride not in [8, 16, 32]:
         raise ValueError('Only allowed output_stride values are 8, 16, 32.')
-
-    def conv_bn(in_channels, out_channels, kernel_size=3, stride=1, padding='SAME'):
-        return nn.Sequential(
-            Conv2d_tf(in_channels, out_channels, kernel_size, stride, padding=padding, bias=False),
-            nn.BatchNorm2d(out_channels, eps=0.001),
-            nn.ReLU6(inplace=True)
-        )
-
-    def conv_dw(in_channels, kernel_size=3, stride=1, padding='SAME', dilation=1):
-        return nn.Sequential(
-            Conv2d_tf(in_channels, in_channels, kernel_size, stride, padding=padding,\
-                      groups=in_channels, dilation=dilation, bias=False),
-            nn.BatchNorm2d(in_channels, eps=0.001),
-            nn.ReLU6(inplace=True)
-        )
-
-    def conv_pw(in_channels, out_channels, kernel_size=1, stride=1, dilation=1):
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size, stride, 0, bias=False),
-            nn.BatchNorm2d(out_channels, eps=0.001),
-            nn.ReLU6(inplace=True),
-        )
 
     # The current_stride variable keeps track of the output stride of the
     # activations, i.e., the running product of convolution strides up to the
@@ -320,7 +231,7 @@ def mobilenet_v1_075(pretrained = False, **kwargs):
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = MobileNet_v1(depth_mutliplier=0.75, **kwargs)
+    model = MobileNet_v1(depth_multiplier=0.75, **kwargs)
     return model
 
 def mobilenet_v1_050(pretrained = False, **kwargs):
@@ -328,7 +239,7 @@ def mobilenet_v1_050(pretrained = False, **kwargs):
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = MobileNet_v1(depth_mutliplier=0.50, **kwargs)
+    model = MobileNet_v1(depth_multiplier=0.50, **kwargs)
     return model
 
 def mobilenet_v1_025(pretrained = False, **kwargs):
@@ -336,7 +247,7 @@ def mobilenet_v1_025(pretrained = False, **kwargs):
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = MobileNet_v1(depth_mutliplier=0.25, **kwargs)
+    model = MobileNet_v1(depth_multiplier=0.25, **kwargs)
     return model
 
 
