@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import tensorflow as tf
 from tensorflow.python import pywrap_tensorflow
 from collections import OrderedDict
@@ -73,8 +77,8 @@ for a, b in dummy_replace.items():
             var_dict[k.replace(a,b)] = var_dict[k]
             del var_dict[k]
 
-print set(var_dict.keys()) - set(x.keys())
-print set(x.keys()) - set(var_dict.keys())
+print(set(var_dict.keys()) - set(x.keys()))
+print(set(x.keys()) - set(var_dict.keys()))
 
 assert len(set(x.keys()) - set(var_dict.keys())) == 0
 for k in set(var_dict.keys()) - set(x.keys()):
@@ -134,12 +138,12 @@ def test_pth(inp):
     model.eval()
 
     end_points = {}
-    inp = torch.autograd.Variable(torch.from_numpy(inp).permute(0,3,1,2), volatile=True)
-
-    ttt = inp
-    for k, m in model.features.named_children():
-        ttt = end_points[k] = m(ttt)
-    out = model(inp)
+    inp = torch.from_numpy(inp).permute(0,3,1,2)
+    with torch.no_grad():
+        tmp = inp
+        for k, m in model.features.named_children():
+            tmp = end_points[k] = m(tmp)
+        out = model(inp)
 
     # return model.features.children().next()(inp)
     return out, end_points
@@ -152,15 +156,15 @@ def assert_almost_equal(tf_tensor, th_tensor):
     f = tf_tensor
 
     #for i in range(0, t.shape[-1]):
-    #    print "tf", i,  t[:,i]
-    #    print "caffe", i,  c[:,i]
+    #    print("tf", i,  t[:,i])
+    #    print("caffe", i,  c[:,i])
 
     if t.shape != f.shape:
-        print "t.shape", t.shape
-        print "f.shape", f.shape
+        print("t.shape", t.shape)
+        print("f.shape", f.shape)
 
     d = np.linalg.norm(t - f)
-    print "d", d
+    print("d", d)
     assert d < 500
 
 print('forward tf')
