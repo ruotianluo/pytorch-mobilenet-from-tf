@@ -112,24 +112,28 @@ def depth_multiplier(depth,
                                                     min_depth)
 
 def conv_bn(in_channels, out_channels, kernel_size=3, stride=1, padding='SAME'):
+    if padding == 'SAME':
+        padding = [(_-1)//2 for _ in kernel_size] if kernel_size * 0 != 0 else (kernel_size-1)//2
     return nn.Sequential(
-        Conv2d_tf(in_channels, out_channels, kernel_size, stride, padding=padding, bias=False),
-        nn.BatchNorm2d(out_channels, eps=0.001),
+        nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=padding, bias=False),
+        nn.BatchNorm2d(out_channels),
         nn.ReLU6(inplace=True)
     )
 
 def conv_dw(in_channels, kernel_size=3, stride=1, padding='SAME', dilation=1):
+    if padding == 'SAME':
+        padding = [(_-1)//2 for _ in kernel_size] if kernel_size * 0 != 0 else (kernel_size-1)//2
     return nn.Sequential(
-        Conv2d_tf(in_channels, in_channels, kernel_size, stride, padding=padding,\
+        nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding=padding,\
                     groups=in_channels, dilation=dilation, bias=False),
-        nn.BatchNorm2d(in_channels, eps=0.001),
+        nn.BatchNorm2d(in_channels),
         nn.ReLU6(inplace=True)
     )
 
 def conv_pw(in_channels, out_channels, kernel_size=1, stride=1, dilation=1):
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel_size, stride, 0, bias=False),
-        nn.BatchNorm2d(out_channels, eps=0.001),
+        nn.BatchNorm2d(out_channels),
         nn.ReLU6(inplace=True),
     )
 
@@ -174,7 +178,7 @@ class ExpandedConv(nn.Module):
         tmp['depthwise'] = conv_dw(inner_size, kernel_size=kernel_size, stride=stride, padding=padding, dilation=layer_rate)
         tmp['project'] = nn.Sequential(
             nn.Conv2d(inner_size, out_channels, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(out_channels, eps=0.001))
+            nn.BatchNorm2d(out_channels))
         self.module = nn.Sequential(tmp)
 
     def forward(self, x):
