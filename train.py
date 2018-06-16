@@ -15,6 +15,8 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
 
+import tensorboardX as tb
+
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
@@ -22,7 +24,7 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
+parser.add_argument('--arch', '-a', metavar='ARCH', default='MobileNet_v2',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
@@ -47,6 +49,8 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
+parser.add_argument('--logdir', dest='logdir', default='logdir',
+                    help='place to save checkpoint and also tensorboard logs')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pre-trained model')
 parser.add_argument('--world-size', default=1, type=int,
@@ -55,6 +59,8 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
                     help='url used to set up distributed training')
 parser.add_argument('--dist-backend', default='gloo', type=str,
                     help='distributed backend')
+parser.add_argument('--ngpus', default=-1, type=int,
+                    help='-1 means all, 0 mean no gpu')
 
 best_prec1 = 0
 
@@ -69,27 +75,39 @@ def main():
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=args.world_size)
 
+    # create tensorbaord
+    if not os.path.isdir(args.logdir):
+        os.makedirs(args.logdir)
+    global summary_writer
+    summary_writer = tb.SummaryWriter(args.logdir)
+
     # create model
     if args.pretrained:
         print("=> using pre-trained model '{}'".format(args.arch))
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
-
-    if not args.distributed:
-        if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
+        if args.arch == 'MobileNet_v2':
+            import mobilenet_v2
+            model = mobilenet_v2.MobileNet_v2()
         else:
-            model = torch.nn.DataParallel(model).cuda()
-    else:
-        model.cuda()
-        model = torch.nn.parallel.DistributedDataParallel(model)
+            model = models.__dict__[args.arch]()
+
+    if args.ngpus != 0:
+        if not args.distributed:
+            if hasattr(model, 'features'):
+                model.features = torch.nn.DataParallel(model.features)
+                model.cuda()
+            else:
+                model = torch.nn.DataParallel(model).cuda()
+        else:
+            model.cuda()
+            model = torch.nn.parallel.DistributedDataParallel(model)
 
     # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().cuda()
-
+    criterion = nn.CrossEntropyLoss()
+    if args.ngpus != 0:
+        criterion.cuda()
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
@@ -157,8 +175,10 @@ def main():
         train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
-
+        prec1, prec5, loss = validate(val_loader, model, criterion)
+        summary_writer.add_scalar('val/prec1', prec1, epoch)
+        summary_writer.add_scalar('val/prec5', prec5, epoch)
+        summary_writer.add_scalar('val/loss', loss, epoch)
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
@@ -186,7 +206,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        target = target.cuda(non_blocking=True)
+        if args.ngpus != 0:
+            target = target.cuda(non_blocking=True)
 
         # compute output
         output = model(input)
@@ -194,6 +215,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output, target, topk=(1, 5))
+        summary_writer.add_scalar('train/prec1', prec1[0], epoch*len(train_loader)+i)
+        summary_writer.add_scalar('train/prec5', prec5[0], epoch*len(train_loader)+i)
+        summary_writer.add_scalar('train/loss', loss.item(), epoch*len(train_loader)+i)
         losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
         top5.update(prec5[0], input.size(0))
@@ -258,13 +282,13 @@ def validate(val_loader, model, criterion):
         print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
               .format(top1=top1, top5=top5))
 
-    return top1.avg
+    return top1.avg, top5.avg, losses.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    torch.save(state, filename)
+    torch.save(state, os.path.join(args.logdir, filename))
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        shutil.copyfile(os.path.join(args.logdir, filename), os.path.join(args.logdir, 'model_best.pth.tar'))
 
 
 class AverageMeter(object):
