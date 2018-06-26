@@ -108,9 +108,15 @@ def main():
     criterion = nn.CrossEntropyLoss()
     if args.ngpus != 0:
         criterion.cuda()
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
+
+    if args.arch == 'MobileNet_v2':
+        param_groups = [{'params':p, 'weight_decay':getattr(p, 'weight_decay', 0)} for p in model.parameters()]
+        optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
+        print('Warning, global weight decay is shaded.')
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), args.lr,
+                                    momentum=args.momentum,
+                                    weight_decay=args.weight_decay)
 
     # optionally resume from a checkpoint
     if args.resume:

@@ -242,9 +242,14 @@ class MobileNet_v2(nn.Module):
         self.classifier = nn.Conv2d(depth_multiplier(conv_defs[-1][1]['num_outputs'],
                                     max(multiplier, 1), min_depth=min_depth), num_classes, 1) #Changed from official behavior of mobilenetv2
 
+        
         # init
         for m in self.modules():
-            break
+            if 'Conv2d' in m.__class__.__name__:
+                if m.groups == 1:
+                    m.weight.weight_decay = 0.00004
+                    # no weight decay for separable conv2d
+
 
     def forward(self, x):
         x = self.features(x)
