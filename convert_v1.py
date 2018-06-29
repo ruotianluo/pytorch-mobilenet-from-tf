@@ -9,7 +9,7 @@ import re
 import torch
 import numpy as np
 
-import mobilenet_v1
+import mobilenet
 
 from scipy.misc import imread, imresize
 
@@ -34,7 +34,7 @@ reader = pywrap_tensorflow.NewCheckpointReader(args.tensorflow_model)
 var_to_shape_map = reader.get_variable_to_shape_map()
 var_dict = {k:reader.get_tensor(k) for k in var_to_shape_map.keys()}
 
-model = mobilenet_v1.MobileNet_v1(depth_multiplier=args.depth_multiplier, num_classes=1001)
+model = mobilenet.MobileNet_v1(depth_multiplier=args.depth_multiplier, num_classes=1001)
 x = model.state_dict()
 
 if args.mode == 'caffe':
@@ -45,6 +45,16 @@ elif args.mode == 'torch':
 
 # del var_dict['Variable']
 # del var_dict['global_step']
+
+
+for k in list(var_dict.keys()):
+    if var_dict[k].ndim == 4:
+        if 'depthwise' in k:
+            var_dict[k] = var_dict[k].transpose((2, 3, 0, 1)).copy(order='C')
+        else:
+            var_dict[k] = var_dict[k].transpose((3, 2, 0, 1)).copy(order='C')
+    if var_dict[k].ndim == 2:
+        var_dict[k] = var_dict[k].transpose((1, 0)).copy(order='C')
 
 for k in list(var_dict.keys()):
     if 'Momentum' in k or 'ExponentialMovingAverage' in k or 'RMSProp' in k:
@@ -61,13 +71,13 @@ dummy_replace = OrderedDict([
                 ('weights', 'weight'),\
                 ('biases', 'bias'),\
                 ('/BatchNorm', '.1'),\
-                ('_pointwise.1', '.pointwise.1'),\
-                ('_depthwise.1', '.depthwise.1'),\
-                ('_pointwise/', '.pointwise.0.'),\
-                ('_depthwise/depthwise_', '.depthwise.0.'),\
+                ('_pointwise.1', '.1.1'),\
+                ('_depthwise.1', '.0.1'),\
+                ('_pointwise/', '.1.0.'),\
+                ('_depthwise/depthwise_', '.0.0.'),\
                 ('features/Logits/Conv2d_1c_1x1/', 'classifier.'),\
-                ('Conv2d_0/', 'Conv2d_0.conv.0.'),\
-                ('Conv2d_0.1/', 'Conv2d_0.conv.1.'),\
+                ('Conv2d_0/', '0.conv.0.'),\
+                ('Conv2d_0.1/', '0.conv.1.'),\
                 ('gamma', 'weight'),\
                 ('beta', 'bias'),\
                 ('/', '.')])
@@ -78,6 +88,13 @@ for a, b in dummy_replace.items():
             var_dict[k.replace(a,b)] = var_dict[k]
             del var_dict[k]
 
+for k in list(var_dict.keys()):
+    if 'Conv2d_' in k:
+        m = re.search('Conv2d_(\d+)', k)
+        var_dict[k.replace(m.group(0), '%d.conv'%(int(m.group(1))))] = var_dict[k]
+        del var_dict[k]
+
+
 print(set(var_dict.keys()) - set(x.keys()))
 print(set(x.keys()) - set(var_dict.keys()))
 
@@ -86,13 +103,6 @@ for k in set(var_dict.keys()) - set(x.keys()):
     del var_dict[k]
 
 for k in list(var_dict.keys()):
-    if var_dict[k].ndim == 4:
-        if 'depthwise' in k:
-            var_dict[k] = var_dict[k].transpose((2, 3, 0, 1)).copy(order='C')
-        else:
-            var_dict[k] = var_dict[k].transpose((3, 2, 0, 1)).copy(order='C')
-    if var_dict[k].ndim == 2:
-        var_dict[k] = var_dict[k].transpose((1, 0)).copy(order='C')
     assert x[k].shape == var_dict[k].shape, k
 
 for k in list(var_dict.keys()):
@@ -143,7 +153,7 @@ def test_pth(inp):
     with torch.no_grad():
         tmp = inp
         for k, m in model.features.named_children():
-            tmp = end_points[k] = m(tmp)
+            tmp = end_points['Conv2d_'+k] = m(tmp)
         out = model(inp)
 
     # return model.features.children().next()(inp)

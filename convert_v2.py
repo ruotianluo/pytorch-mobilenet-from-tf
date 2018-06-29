@@ -9,7 +9,7 @@ import re
 import torch
 import numpy as np
 
-import mobilenet_v2
+import mobilenet
 import mobilenet_v2_tf
 
 from scipy.misc import imread, imresize
@@ -35,7 +35,7 @@ reader = pywrap_tensorflow.NewCheckpointReader(args.tensorflow_model)
 var_to_shape_map = reader.get_variable_to_shape_map()
 var_dict = {k:reader.get_tensor(k) for k in var_to_shape_map.keys()}
 
-model = mobilenet_v2.MobileNet_v2(multiplier=args.depth_multiplier, num_classes=1001)
+model = mobilenet.MobileNet_v2(depth_multiplier=args.depth_multiplier, num_classes=1001)
 x = model.state_dict()
 
 if args.mode == 'caffe':
@@ -52,6 +52,15 @@ for k in list(var_dict.keys()):
         del var_dict[k]
 
 for k in list(var_dict.keys()):
+    if var_dict[k].ndim == 4:
+        if 'depthwise' in k:
+            var_dict[k] = var_dict[k].transpose((2, 3, 0, 1)).copy(order='C')
+        else:
+            var_dict[k] = var_dict[k].transpose((3, 2, 0, 1)).copy(order='C')
+    if var_dict[k].ndim == 2:
+        var_dict[k] = var_dict[k].transpose((1, 0)).copy(order='C')
+
+for k in list(var_dict.keys()):
     if k.find('/') >= 0:
         var_dict['features'+k[k.find('/'):]] = var_dict[k]
         del var_dict[k]
@@ -59,7 +68,7 @@ for k in list(var_dict.keys()):
 for k in list(var_dict.keys()):
     if 'expanded_conv_' in k:
         m = re.search('expanded_conv_(\d+)', k)
-        var_dict[k.replace(m.group(0), 'layer_%d.module'%(int(m.group(1))+2))] = var_dict[k]
+        var_dict[k.replace(m.group(0), '%d.conv'%(int(m.group(1))+1))] = var_dict[k]
         del var_dict[k]
 
 dummy_replace = OrderedDict([
@@ -67,16 +76,19 @@ dummy_replace = OrderedDict([
                 ('moving_variance', 'running_var'),\
                 ('weights', 'weight'),\
                 ('biases', 'bias'),\
-                ('expanded_conv', 'layer_2.module'),\
-                ('depthwise_weight', '0.weight'),\
+                ('expanded_conv', '1.conv'),\
+                ('depthwise/depthwise_weight', '1.0.weight'),\
                 ('/BatchNorm', '.1'),\
-                ('project/weight', 'project.0.weight'),\
-                ('expand/weight', 'expand.0.weight'),\
+                ('project.1', '2.1'),\
+                ('expand.1', '0.1'),\
+                ('depthwise.1', '1.1'),\
+                ('project/weight', '2.0.weight'),\
+                ('expand/weight', '0.0.weight'),\
                 ('features/Logits/Conv2d_1c_1x1/', 'classifier.'),\
-                ('Conv.1', 'layer_1.conv.1'),\
-                ('Conv_1.1', 'layer_19.conv.1'),\
-                ('Conv/', 'layer_1.conv.0.'),\
-                ('Conv_1/', 'layer_19.conv.0.'),\
+                ('Conv.1', '0.conv.1'),\
+                ('Conv_1.1', '18.conv.1'),\
+                ('Conv/', '0.conv.0.'),\
+                ('Conv_1/', '18.conv.0.'),\
                 ('gamma', 'weight'),\
                 ('beta', 'bias'),\
                 ('/', '.')])
@@ -95,13 +107,6 @@ for k in set(var_dict.keys()) - set(x.keys()):
     del var_dict[k]
 
 for k in list(var_dict.keys()):
-    if var_dict[k].ndim == 4:
-        if 'depthwise' in k:
-            var_dict[k] = var_dict[k].transpose((2, 3, 0, 1)).copy(order='C')
-        else:
-            var_dict[k] = var_dict[k].transpose((3, 2, 0, 1)).copy(order='C')
-    if var_dict[k].ndim == 2:
-        var_dict[k] = var_dict[k].transpose((1, 0)).copy(order='C')
     if x[k].shape != var_dict[k].shape:
         print(str(k) + str(x[k].shape) + str(var_dict[k].shape))
 
@@ -154,7 +159,7 @@ def test_pth(inp):
     with torch.no_grad():
         tmp = inp
         for k, m in model.features.named_children():
-            tmp = end_points[k] = m(tmp)
+            tmp = end_points['layer_'+str(int(k)+1)] = m(tmp)
         out = model(inp)
 
     # return model.features.children().next()(inp)
