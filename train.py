@@ -62,6 +62,8 @@ parser.add_argument('--dist-backend', default='gloo', type=str,
 parser.add_argument('--ngpus', default=-1, type=int,
                     help='-1 means all, 0 mean no gpu')
 
+parser.add_argument('--mobilenet_training', action='store_true', help='Use mobilenet training strategy. (nestorov, lr decay)')
+
 best_prec1 = 0
 
 
@@ -111,12 +113,13 @@ def main():
 
     if args.arch == 'MobileNet_v2':
         param_groups = [{'params':p, 'weight_decay':getattr(p, 'weight_decay', 0)} for p in model.parameters()]
-        optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
+        optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum, nesterov=args.mobilenet_training)
         print('Warning, global weight decay is shaded.')
     else:
         optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                     momentum=args.momentum,
-                                    weight_decay=args.weight_decay)
+                                    weight_decay=args.weight_decay,
+                                    nesterov=args.mobilenet_training)
 
     # optionally resume from a checkpoint
     if args.resume:
@@ -317,7 +320,11 @@ class AverageMeter(object):
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = args.lr * (0.1 ** (epoch // 30))
+    if args.mobilenet_training:
+        lr = args.lr * (0.98 ** (epoch))
+    else:
+        lr = args.lr * (0.1 ** (epoch // 30))
+    summary_writer.add_scalar('learning_rate', lr, epoch)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
