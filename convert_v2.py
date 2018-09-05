@@ -39,7 +39,7 @@ model = mobilenet.MobileNet_v2(depth_multiplier=args.depth_multiplier, num_class
 x = model.state_dict()
 
 if args.mode == 'caffe':
-    var_dict['MobilenetV1/Conv2d_0/weights'] = var_dict['MobilenetV1/Conv2d_0/weights'][:,:,::-1,:] / 127.5
+    var_dict['MobilenetV2/Conv/weights'] = var_dict['MobilenetV2/Conv/weights'][:,:,::-1,:] / 127.5
 elif args.mode == 'torch':
     print('Please use transforms.Normalize([0.5, 0.5, 0.5],[0.5, 0.5, 0.5]) for preprocessing')
     # var_dict['MobilenetV1/Conv2d_0/weights'] = var_dict['MobilenetV1/Conv2d_0/weights'] * 2 * np.array([0.229, 0.224, 0.225])[np.newaxis,np.newaxis,:,np.newaxis]
@@ -155,6 +155,8 @@ def test_pth(inp):
     model.eval()
 
     end_points = {}
+    if args.mode == 'caffe':
+        inp = inp[:,:,:,::-1]*255.0/2
     inp = torch.from_numpy(inp).permute(0,3,1,2)
     with torch.no_grad():
         tmp = inp
@@ -181,7 +183,7 @@ def assert_almost_equal(tf_tensor, th_tensor):
         print("f.shape", f.shape)
 
     d = np.linalg.norm(t - f)
-    print("d", d)
+    print("d", d, f.shape)
     assert d < 500
 
 print('forward tf')
